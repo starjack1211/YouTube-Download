@@ -10,13 +10,17 @@ struct DownloadFailure: LocalizedError {
 }
 
 final class TransferProgress: NSObject, URLSessionDownloadDelegate {
-    let update: @Sendable (Double) -> Void
-    init(update: @escaping @Sendable (Double) -> Void) { self.update = update }
+    let update: @Sendable (Int64, Int64, TimeInterval) -> Void
+    private var lastUpdate: TimeInterval = 0
+    init(update: @escaping @Sendable (Int64, Int64, TimeInterval) -> Void) { self.update = update }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                     didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
                     totalBytesExpectedToWrite: Int64) {
-        if totalBytesExpectedToWrite > 0 { update(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)) }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastUpdate >= 0.2 || (totalBytesExpectedToWrite > 0 && totalBytesWritten >= totalBytesExpectedToWrite) else { return }
+        lastUpdate = now
+        update(totalBytesWritten, totalBytesExpectedToWrite, now)
     }
 }
 
@@ -24,7 +28,10 @@ final class TransferProgress: NSObject, URLSessionDownloadDelegate {
 final class Downloader: ObservableObject {
     @Published var busy = false
     @Published var status = "貼上連結，或從 YouTube 分享影片。"
-    @Published var progress: Double = 0
+    @Published var transferInfo: TransferSnapshot?
+    @Published var transferPart = ""
+    private var statistics: TransferStatistics?
+    private var activeTransferID: UUID?
     @Published var detail = ""
     @Published var output: URL?
     @Published var saved = false
@@ -35,9 +42,9 @@ final class Downloader: ObservableObject {
         guard let id = YouTubeLink.videoID(in: text) else {
             status = "請輸入有效的 YouTube 影片連結（支援 Shorts）。"; return
         }
-        busy = true; progress = 0; detail = ""; output = nil; saved = false
+        busy = true; transferInfo = nil; statistics = nil; detail = ""; output = nil; saved = false
         job = Task {
-            defer { busy = false; job = nil }
+            defer { busy = false; activeTransferID = nil; transferInfo = nil; job = nil }
             do {
                 let auth = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
                 guard auth == .authorized || auth == .limited else {
@@ -78,15 +85,25 @@ final class Downloader: ObservableObject {
                     detail += rate > 0 ? " · 音軌約 \(rate) kbps" : " · 原始 AAC 音軌"
                     if withinCap.isEmpty { detail += "（最低可用音質）" }
                 } else { detail += " · 影片內建音軌" }
+                let needsAudio = !video.includesAudioTrack && audio != nil
+                let plannedStreams = needsAudio ? [video, audio!] : [video]
+                let sizes = plannedStreams.map { stream -> Int64? in
+                    let value = URLComponents(url: stream.url, resolvingAgainstBaseURL: false)?
+                        .queryItems?.first(where: { $0.name == "clen" })?.value
+                    return value.flatMap(Int64.init)
+                }
+                statistics = TransferStatistics(expectedSizes: sizes, startedAt: ProcessInfo.processInfo.systemUptime)
                 status = "正在下載影像…"
-                let videoURL = try await transfer(video, to: folder.appendingPathComponent("video.mp4"), base: 0, span: 0.55)
+                transferPart = needsAudio ? "影像下載（1/2）" : "影片下載"
+                let videoURL = try await transfer(video, to: folder.appendingPathComponent("video.mp4"), part: 0)
                 var audioURL: URL?
                 if !video.includesAudioTrack, let audio {
                     status = "正在下載音軌…"
-                    audioURL = try await transfer(audio, to: folder.appendingPathComponent("audio.m4a"), base: 0.55, span: 0.30)
+                    transferPart = "音軌下載（2/2）"
+                    audioURL = try await transfer(audio, to: folder.appendingPathComponent("audio.m4a"), part: 1)
                 }
                 try Task.checkCancellation()
-                status = "正在合併影音…"; progress = 0.86
+                status = "下載完成，正在合併影音…"; transferInfo = nil
                 let merged = folder.appendingPathComponent("merged.mp4")
                 try await mux(video: videoURL, audio: audioURL, to: merged)
                 try Task.checkCancellation()
@@ -96,13 +113,13 @@ final class Downloader: ObservableObject {
                 let final = downloads.appendingPathComponent("\(id)-\(UUID().uuidString.prefix(8)).mp4")
                 try FileManager.default.moveItem(at: merged, to: final)
                 output = final
-                status = "正在儲存到相簿…"; progress = 0.96
+                status = "正在儲存到相簿…"
                 try await saveToPhotos(final)
-                saved = true; progress = 1; status = "已儲存到相簿"
+                saved = true; status = "已儲存到相簿"
             } catch is CancellationError {
-                status = "已取消下載。"; progress = 0
+                status = "已取消下載。"
             } catch {
-                if Task.isCancelled { status = "已取消下載。"; progress = 0 }
+                if Task.isCancelled { status = "已取消下載。" }
                 else { status = "下載未完成：\(error.localizedDescription)" }
             }
         }
@@ -117,7 +134,7 @@ final class Downloader: ObservableObject {
             defer { busy = false; job = nil }
             do {
                 try await saveToPhotos(output)
-                saved = true; status = "已儲存到相簿"; progress = 1
+                saved = true; status = "已儲存到相簿"
             } catch { status = "儲存失敗：\(error.localizedDescription)" }
         }
     }
@@ -131,12 +148,32 @@ final class Downloader: ObservableObject {
         } catch { status = error.localizedDescription }
     }
 
-    private func transfer(_ stream: YouTubeKit.Stream, to destination: URL, base: Double, span: Double) async throws -> URL {
+    private func transfer(_ stream: YouTubeKit.Stream, to destination: URL, part: Int) async throws -> URL {
+        transferInfo = nil
         try await stream.waitUntilAvailable()
+        try Task.checkCancellation()
+        let identifier = UUID()
+        activeTransferID = identifier
+        let now = ProcessInfo.processInfo.systemUptime
+        statistics?.beginPart(part, at: now)
+        transferInfo = statistics?.snapshot(at: now)
+        // Refresh even without callbacks so a stalled connection never shows a stale speed.
+        let ticker = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 500_000_000) } catch { break }
+                guard let self, self.activeTransferID == identifier else { break }
+                self.transferInfo = self.statistics?.snapshot(at: ProcessInfo.processInfo.systemUptime)
+            }
+        }
+        defer { ticker.cancel(); activeTransferID = nil }
         var request = URLRequest(url: stream.url)
         request.timeoutInterval = 120
-        let observer = TransferProgress { [weak self] fraction in
-            Task { @MainActor in self?.progress = base + span * fraction }
+        let observer = TransferProgress { [weak self] bytes, total, timestamp in
+            Task { @MainActor in
+                guard let self, self.activeTransferID == identifier else { return }
+                self.statistics?.record(bytes: bytes, expectedBytes: total, at: timestamp)
+                self.transferInfo = self.statistics?.snapshot(at: ProcessInfo.processInfo.systemUptime)
+            }
         }
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForResource = 3600
@@ -148,6 +185,10 @@ final class Downloader: ObservableObject {
             throw DownloadFailure(message: "媒體伺服器回傳 HTTP \(code)，請稍後重試。")
         }
         try Task.checkCancellation()
+        let attributes = try FileManager.default.attributesOfItem(atPath: temp.path)
+        let count = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        statistics?.finishPart(bytes: count, at: ProcessInfo.processInfo.systemUptime)
+        transferInfo = statistics?.snapshot(at: ProcessInfo.processInfo.systemUptime)
         try FileManager.default.moveItem(at: temp, to: destination)
         return destination
     }

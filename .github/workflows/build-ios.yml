@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Test shared-link parsing
+      - name: Test link parsing and transfer statistics
         run: swift test
       - name: Install project generator
         run: brew install xcodegen

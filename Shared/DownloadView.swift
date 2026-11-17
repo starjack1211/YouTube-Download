@@ -48,7 +48,34 @@ struct DownloadView: View {
                 }.disabled(downloader.busy)
                 Section {
                     if downloader.busy {
-                        ProgressView(value: downloader.progress)
+                        if let info = downloader.transferInfo {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text(info.isOverall ? "整體下載進度" : downloader.transferPart).font(.headline)
+                                    Spacer()
+                                    if let fraction = info.fraction {
+                                        Text("\(Int(fraction * 100))%").monospacedDigit()
+                                    }
+                                }
+                                if let fraction = info.fraction {
+                                    ProgressView(value: fraction)
+                                        .progressViewStyle(.linear)
+                                        .accessibilityLabel("下載進度")
+                                        .accessibilityValue("\(Int(fraction * 100))%")
+                                } else {
+                                    ProgressView("正在接收資料…")
+                                }
+                                Text(info.capacityText).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                                LabeledContent("下載速度", value: info.speedText).monospacedDigit()
+                                LabeledContent(info.isOverall ? "預估下載剩餘" : "此檔預估剩餘", value: info.remainingText).monospacedDigit()
+                                Text(info.isOverall
+                                     ? "\(downloader.transferPart) · 剩餘時間依目前網速估算，不含合併及相簿寫入。"
+                                     : "目前顯示此檔案進度；尚無完整影音總大小。合併及相簿寫入時間另計。")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.padding(.vertical, 8)
+                        } else {
+                            ProgressView(downloader.status)
+                        }
                         Button("取消下載", role: .destructive) { downloader.cancel() }
                     } else {
                         Button { download() } label: {
