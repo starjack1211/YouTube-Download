@@ -12,6 +12,14 @@ final class LiveExtractionTests: XCTestCase {
     }
     private func check(_ id: String, expectedMinimumDuration: Double) async throws {
         let video = YouTube(videoID: id, methods: [.local])
+        let stamp = try await video.signatureTimestamp
+        let config = try await video.ytcfg
+        for client in [InnerTube.ClientType.ios, .tvSamsung, .visionOS, .web] {
+            do {
+                let info = try await InnerTube(client: client, signatureTimestamp: stamp, ytcfg: config).player(videoID: id)
+                print("DIAGNOSTIC \(id) \(client): status=\(info.playabilityStatus?.status ?? "nil") reason=\(info.playabilityStatus?.reason ?? "nil") id=\(info.videoDetails?.videoId ?? "nil") formats=\(info.streamingData?.adaptiveFormats?.count ?? 0)")
+            } catch { print("DIAGNOSTIC \(id) \(client): \(error)") }
+        }
         let streams = try await video.streams
         print("LIVE \(id): extracted \(streams.count) streams")
         let videoStream = try XCTUnwrap(streams.filter {
