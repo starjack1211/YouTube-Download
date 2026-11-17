@@ -37,9 +37,8 @@ def replace(path, old, new):
     file.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 youtube = "Sources/YouTubeKit/YouTube.swift"
-replace(youtube,
-    "let innertubeClients: [InnerTube.ClientType] = [.tvSamsung, .visionOS, .web]",
-    "let innertubeClients: [InnerTube.ClientType] = [.ios, .tvSamsung, .visionOS, .web]")
+replace(youtube, "request.httpShouldHandleCookies = false", "request.httpShouldHandleCookies = true")
+replace(youtube, "request.httpShouldHandleCookies = false", "request.httpShouldHandleCookies = true")
 replace(youtube,
     "var existingITags = Set<Int>()",
     "var existingITags = Set<Int>()\n                    var extractionErrors = [Error]()")
@@ -108,3 +107,15 @@ replace(solver,
 # Integration tests compile the exact merger used by the iPhone app.
 shutil.copyfile(ROOT / "Shared/MediaMuxer.swift", ROOT / "Integration/Tests/MediaMuxer.swift")
 print("Prepared checksum-verified YouTubeKit with source fallback and signed-URL fixes")
+
+replace(youtube,
+    """                            _js = nil
+                            _jsURL = nil
+                            YouTube.__js = nil""",
+    """                            _watchHTML = nil
+                            _embedHTML = nil
+                            _ytcfg = nil
+                            _signatureTimestamp = nil
+                            _js = nil
+                            _jsURL = nil
+                            YouTube.__js = nil""")
