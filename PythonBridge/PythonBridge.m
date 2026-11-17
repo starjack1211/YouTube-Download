@@ -66,7 +66,10 @@ NSString *PYRunRequest(NSString *requestJSON, NSString *resourcePath) {
             config.buffered_stdio = 0;
             config.install_signal_handlers = 0;
             NSString *home = [resourcePath stringByAppendingPathComponent:@"python"];
-            status = PyConfig_SetBytesString(&config, &config.home, home.UTF8String);
+            NSString *executable = NSBundle.mainBundle.executablePath;
+            status = PyConfig_SetBytesString(&config, &config.executable, executable.UTF8String);
+            if (!PyStatus_Exception(status))
+                status = PyConfig_SetBytesString(&config, &config.home, home.UTF8String);
             if (!PyStatus_Exception(status)) {
                 config.module_search_paths_set = 1;
                 NSArray<NSString *> *paths = @[

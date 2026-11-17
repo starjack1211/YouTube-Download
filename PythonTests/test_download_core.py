@@ -173,3 +173,52 @@ class HTTPTransferTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
+
+class NativeProviderTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import importlib
+        import sys
+        import types
+        cls.native = types.ModuleType("_iosjs")
+        sys.modules["_iosjs"] = cls.native
+        try:
+            cls.module = importlib.import_module("ios_jsc")
+        finally:
+            sys.modules.pop("_iosjs", None)
+
+    def requests(self):
+        from yt_dlp.extractor.youtube.jsc.provider import (
+            JsChallengeRequest, JsChallengeType, NChallengeInput, SigChallengeInput)
+        return [
+            JsChallengeRequest(JsChallengeType.N, NChallengeInput("player", ["n"]), "id"),
+            JsChallengeRequest(JsChallengeType.SIG, SigChallengeInput("player", ["sig"]), "id"),
+        ]
+
+    def test_native_provider_returns_n_and_signature_results(self):
+        provider = self.module.IOSJavaScriptCoreJCP(None, None, {})
+        response = {"responses": [
+            {"type": "result", "data": {"n": "solved-n"}},
+            {"type": "result", "data": {"sig": "solved-sig"}},
+        ]}
+        with patch.object(provider, "_get_player", return_value="player-code"), patch.object(
+                self.native, "solve", return_value=json.dumps(response), create=True) as solve:
+            results = list(provider.bulk_solve(self.requests()))
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(r.error is None for r in results), repr(results))
+        self.assertEqual(results[0].response.output.results, {"n": "solved-n"})
+        self.assertEqual(results[1].response.output.results, {"sig": "solved-sig"})
+        payload = json.loads(solve.call_args.args[0])
+        self.assertEqual([r["type"] for r in payload["requests"]], ["n", "sig"])
+
+    def test_incomplete_solution_fails_once_per_request(self):
+        provider = self.module.IOSJavaScriptCoreJCP(None, None, {})
+        response = {"responses": [
+            {"type": "result", "data": {"n": "solved"}},
+            {"type": "result", "data": {}},
+        ]}
+        with patch.object(provider, "_get_player", return_value="player-code"), patch.object(
+                self.native, "solve", return_value=json.dumps(response), create=True):
+            results = list(provider.bulk_solve(self.requests()))
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(r.error is not None for r in results))
