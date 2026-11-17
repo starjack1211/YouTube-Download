@@ -2,10 +2,10 @@ import Foundation
 
 enum YouTubeLink {
     static func videoID(in text: String) -> String? {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
+        guard let detector = try? NSRegularExpression(pattern: #"https?://[^\s<>"「」『』（）]+"#, options: .caseInsensitive) else { return nil }
         let ns = text as NSString
         for match in detector.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
-            guard let url = match.url, ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+            guard let url = URL(string: ns.substring(with: match.range)), ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
                   let host = url.host?.lowercased(), let c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { continue }
             let parts = url.path.split(separator: "/").map(String.init)
             let id: String?

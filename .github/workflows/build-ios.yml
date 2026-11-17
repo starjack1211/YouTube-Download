@@ -16,8 +16,10 @@ jobs:
         run: swift test
       - name: Install project generator
         run: brew install xcodegen
-      - name: Generate Xcode project
-        run: xcodegen generate
+      - name: Generate icon and Xcode project
+        run: |
+          python3 Scripts/make_icon.py
+          xcodegen generate
       - name: Build iPhone app and share extension
         run: |
           set -o pipefail
