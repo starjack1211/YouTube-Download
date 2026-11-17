@@ -35,7 +35,7 @@ enum MediaMuxer {
         }, onCancel: { exporter.cancelExport() })
         try Task.checkCancellation()
         guard exporter.status == .completed else {
-            throw exporter.error ?? DownloadFailure(message: "影音合併失敗。")
+            throw exporter.error ?? MediaMergeError(message: "影音合併失敗。")
         }
     }
 

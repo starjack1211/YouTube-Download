@@ -12,7 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: macos-15-intel
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Prepare reviewed extractor patch
@@ -30,6 +30,9 @@ jobs:
         run: |
           python3 Scripts/make_icon.py
           xcodegen generate
+      - name: iPhone simulator download, Photos, share-input and UI tests
+        timeout-minutes: 20
+        run: bash Scripts/test_simulator.sh
       - name: Build iPhone app and share extension
         run: |
           set -o pipefail
@@ -53,5 +56,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-log
-          path: build.log
+          path: |
+            build.log
+            integration.log
+            simulator-build.log
+            simulator-tests.log
+            SimulatorTests.xcresult
           if-no-files-found: ignore

@@ -6,7 +6,7 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [.library(name: "LinkValidation", targets: ["LinkValidation"])],
     targets: [
-        .target(name: "LinkValidation", path: "Shared", exclude: ["Downloader.swift", "DownloadView.swift", "Notices.swift", "MediaMuxer.swift"], sources: ["YouTubeLink.swift", "TransferStatistics.swift"]),
+        .target(name: "LinkValidation", path: "Shared", exclude: ["Downloader.swift", "DownloadView.swift", "Notices.swift", "MediaMuxer.swift", "SharedLinkReader.swift"], sources: ["YouTubeLink.swift", "TransferStatistics.swift"]),
         .testTarget(name: "LinkValidationTests", dependencies: ["LinkValidation"], path: "Tests")
     ]
 )

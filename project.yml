@@ -39,8 +39,31 @@ targets:
         INFOPLIST_FILE: Config/Share.plist
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
+  DownloadTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [iOSTests]
+    dependencies:
+      - target: YouTubeDownload
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.starjack1211.YouTubeDownload.Tests
+  AppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [AppUITests]
+    dependencies:
+      - target: YouTubeDownload
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.starjack1211.YouTubeDownload.UITests
 schemes:
   YouTubeDownload:
     build:
       targets:
         YouTubeDownload: all
+    test:
+      targets: [DownloadTests, AppUITests]
+      gatherCoverageData: true

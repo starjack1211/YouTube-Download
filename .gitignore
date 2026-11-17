@@ -3,3 +3,10 @@ build/
 .DS_Store
 .swiftpm/
 .build/
+
+Vendor/
+work-vendor.zip
+Integration/Tests/MediaMuxer.swift
+build-simulator/
+*.xcresult/
+*.log
