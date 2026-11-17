@@ -12,44 +12,56 @@ permissions:
 jobs:
   build:
     runs-on: macos-15-intel
-    timeout-minutes: 45
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: 1
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare reviewed extractor patch
-        run: python3 Scripts/prepare_vendor.py
+      - name: Prepare checksum-pinned embedded Python and yt-dlp
+        run: python3 Scripts/prepare_python.py
+      - name: Test Python quality selection, cancellation and real HTTP transfers
+        id: python_tests
+        continue-on-error: true
+        env:
+          PYTHONPATH: PythonApp:Vendor/python_packages
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s PythonTests -p test_download_core.py -v
       - name: Test link parsing and transfer statistics
         id: unit_tests
         continue-on-error: true
         run: swift test
-      - name: Live YouTube download, merge and signature regression tests
+      - name: Live Python YouTube downloads
         id: live_tests
         continue-on-error: true
         timeout-minutes: 10
+        env:
+          PYTHONPATH: PythonApp:Vendor/python_packages
+          PYTHONDONTWRITEBYTECODE: "1"
+          RUN_LIVE_TESTS: "1"
         run: |
           set -o pipefail
-          swift test --package-path Integration | tee integration.log
+          python3 -m unittest discover -s PythonTests -p test_live.py -v 2>&1 | tee integration.log
       - name: Install project generator
         run: brew install xcodegen
       - name: Generate icon and Xcode project
         run: |
           python3 Scripts/make_icon.py
           xcodegen generate
-      - name: iPhone simulator download, Photos, share-input and UI tests
+      - name: iPhone embedded Python, download, Photos, share-input and UI tests
         id: simulator_tests
         continue-on-error: true
-        timeout-minutes: 20
+        timeout-minutes: 25
         run: bash Scripts/test_simulator.sh
       - name: Require every test suite to pass before packaging
         env:
+          PYTHON_RESULT: ${{ steps.python_tests.outcome }}
           UNIT_RESULT: ${{ steps.unit_tests.outcome }}
           LIVE_RESULT: ${{ steps.live_tests.outcome }}
           SIMULATOR_RESULT: ${{ steps.simulator_tests.outcome }}
         run: |
-          echo "Unit tests: $UNIT_RESULT"
+          echo "Python tests: $PYTHON_RESULT"
+          echo "Swift tests: $UNIT_RESULT"
           echo "Live YouTube tests: $LIVE_RESULT"
           echo "iPhone simulator tests: $SIMULATOR_RESULT"
+          test "$PYTHON_RESULT" = success
           test "$UNIT_RESULT" = success
           test "$LIVE_RESULT" = success
           test "$SIMULATOR_RESULT" = success

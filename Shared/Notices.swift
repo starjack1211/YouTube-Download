@@ -1,27 +1,15 @@
 import Foundation
-
 enum Notices {
     static let youtubeKit = """
-    MIT License
-    
-    Copyright (c) 2022 Alexander Eichhorn
-    
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-    
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
-    
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE.
+    這個版本使用：
+    • Python 3.13（Python Software Foundation License）
+    • yt-dlp（Unlicense）
+    • yt-dlp-ejs（Unlicense，內含依賴套件授權）
+    • certifi（Mozilla Public License 2.0）
+    Python 授權位於 python/lib/python3.13/LICENSE.txt，
+    各 Python 套件授權位於 python_packages 的 dist-info/licenses 目錄。
+    https://www.python.org/
+    https://github.com/yt-dlp/yt-dlp
+    https://github.com/yt-dlp/ejs
     """
 }

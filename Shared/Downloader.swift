@@ -2,26 +2,10 @@ import Foundation
 import Combine
 import Photos
 import AVFoundation
-import YouTubeKit
 
 struct DownloadFailure: LocalizedError {
     let message: String
     var errorDescription: String? { message }
-}
-
-final class TransferProgress: NSObject, URLSessionDownloadDelegate {
-    let update: @Sendable (Int64, Int64, TimeInterval) -> Void
-    private var lastUpdate: TimeInterval = 0
-    init(update: @escaping @Sendable (Int64, Int64, TimeInterval) -> Void) { self.update = update }
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
-                    totalBytesExpectedToWrite: Int64) {
-        let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastUpdate >= 0.2 || (totalBytesExpectedToWrite > 0 && totalBytesWritten >= totalBytesExpectedToWrite) else { return }
-        lastUpdate = now
-        update(totalBytesWritten, totalBytesExpectedToWrite, now)
-    }
 }
 
 @MainActor
@@ -50,58 +34,45 @@ final class Downloader: ObservableObject {
                 guard auth == .authorized || auth == .limited else {
                     throw DownloadFailure(message: "請在 iPhone「設定 → App → 影片下載 → 照片」允許加入照片後重試。")
                 }
-                status = "正在解析影片…"
-                let streams = try await YouTube(videoID: id, methods: [.local]).streams
-                try Task.checkCancellation()
-                let videos = streams.filter {
-                    $0.includesVideoTrack && $0.isNativelyPlayable && $0.fileExtension == .mp4 &&
-                    ($0.videoResolution ?? Int.max) <= maxHeight
-                }.sorted {
-                    if $0.videoResolution != $1.videoResolution { return ($0.videoResolution ?? 0) > ($1.videoResolution ?? 0) }
-                    return !$0.includesAudioTrack && $1.includesAudioTrack
-                }
-                guard let video = videos.first else {
-                    throw DownloadFailure(message: "找不到符合畫質上限的相容 MP4。請提高畫質上限，或改試另一部影片。")
-                }
-                let audios = streams.filter {
-                    $0.includesAudioTrack && !$0.includesVideoTrack && $0.isNativelyPlayable &&
-                    ($0.fileExtension == .m4a || $0.fileExtension == .mp4)
-                }
-                let withinCap = audios.filter { ($0.averageBitrate ?? $0.bitrate ?? Int.max) <= audioKbps * 1000 }
-                let audio = (withinCap.isEmpty ? audios : withinCap).sorted {
-                    let a = $0.averageBitrate ?? $0.bitrate ?? 0
-                    let b = $1.averageBitrate ?? $1.bitrate ?? 0
-                    return withinCap.isEmpty ? a < b : a > b
-                }.first
-                if !video.includesAudioTrack && audio == nil {
-                    throw DownloadFailure(message: "這部影片沒有可合併的 AAC 音軌，無法輸出有聲影片。")
-                }
+                status = "Python 正在解析影片…"
                 let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 defer { try? FileManager.default.removeItem(at: folder) }
-                detail = "\(video.videoResolution ?? 0)p"
-                if !video.includesAudioTrack, let audio {
-                    let rate = (audio.averageBitrate ?? audio.bitrate ?? 0) / 1000
-                    detail += rate > 0 ? " · 音軌約 \(rate) kbps" : " · 原始 AAC 音軌"
-                    if withinCap.isEmpty { detail += "（最低可用音質）" }
-                } else { detail += " · 影片內建音軌" }
-                let needsAudio = !video.includesAudioTrack && audio != nil
-                let plannedStreams = needsAudio ? [video, audio!] : [video]
-                let sizes = plannedStreams.map { stream -> Int64? in
-                    let value = URLComponents(url: stream.url, resolvingAgainstBaseURL: false)?
-                        .queryItems?.first(where: { $0.name == "clen" })?.value
-                    return value.flatMap(Int64.init)
+                let identifier = UUID()
+                activeTransferID = identifier
+                var activePart: Int?
+                let ticker = Task { [weak self] in
+                    while !Task.isCancelled {
+                        do { try await Task.sleep(nanoseconds: 500_000_000) } catch { break }
+                        guard let self, self.activeTransferID == identifier else { break }
+                        if self.transferInfo != nil {
+                            self.transferInfo = self.statistics?.snapshot(at: ProcessInfo.processInfo.systemUptime)
+                        }
+                    }
                 }
-                statistics = TransferStatistics(expectedSizes: sizes, startedAt: ProcessInfo.processInfo.systemUptime)
-                status = "正在下載影像…"
-                transferPart = needsAudio ? "影像下載（1/2）" : "影片下載"
-                let videoURL = try await transfer(video, to: folder.appendingPathComponent("video.mp4"), part: 0)
-                var audioURL: URL?
-                if !video.includesAudioTrack, let audio {
-                    status = "正在下載音軌…"
-                    transferPart = "音軌下載（2/2）"
-                    audioURL = try await transfer(audio, to: folder.appendingPathComponent("audio.m4a"), part: 1)
+                defer { ticker.cancel() }
+                let reply = try await PythonBackend.shared.download(
+                    id: id, maxHeight: maxHeight, audioKbps: audioKbps, directory: folder
+                ) { [weak self] event in
+                    guard let self, self.activeTransferID == identifier else { return }
+                    guard event.stage != "extracting", let part = event.part_index else { return }
+                    let now = ProcessInfo.processInfo.systemUptime
+                    if activePart != part {
+                        activePart = part
+                        self.statistics = TransferStatistics(expectedSizes: event.sizes, startedAt: now)
+                        self.statistics?.beginPart(part, at: now)
+                    }
+                    let count = event.part_count ?? 1
+                    self.transferPart = count == 1 ? "影片下載" : (part == 0 ? "影像下載（1/2）" : "音軌下載（2/2）")
+                    self.status = part == 0 ? "Python 正在下載影像…" : "Python 正在下載音軌…"
+                    self.statistics?.record(bytes: event.downloaded_bytes ?? 0, expectedBytes: event.total_bytes ?? -1, at: now)
+                    self.transferInfo = self.statistics?.snapshot(at: now)
                 }
+                activeTransferID = nil
+                guard let path = reply.video else { throw DownloadFailure(message: "Python 沒有回傳影片檔案。") }
+                let videoURL = URL(fileURLWithPath: path)
+                let audioURL = reply.audio.map { URL(fileURLWithPath: $0) }
+                detail = reply.detail ?? "yt-dlp"
                 try Task.checkCancellation()
                 status = "下載完成，正在合併影音…"; transferInfo = nil
                 let merged = folder.appendingPathComponent("merged.mp4")
@@ -146,51 +117,6 @@ final class Downloader: ObservableObject {
             self.output = nil
             status = saved ? "已刪除 App 內副本，相簿影片仍保留。" : "已刪除 App 內副本。"
         } catch { status = error.localizedDescription }
-    }
-
-    private func transfer(_ stream: YouTubeKit.Stream, to destination: URL, part: Int) async throws -> URL {
-        transferInfo = nil
-        try await stream.waitUntilAvailable()
-        try Task.checkCancellation()
-        let identifier = UUID()
-        activeTransferID = identifier
-        let now = ProcessInfo.processInfo.systemUptime
-        statistics?.beginPart(part, at: now)
-        transferInfo = statistics?.snapshot(at: now)
-        // Refresh even without callbacks so a stalled connection never shows a stale speed.
-        let ticker = Task { [weak self] in
-            while !Task.isCancelled {
-                do { try await Task.sleep(nanoseconds: 500_000_000) } catch { break }
-                guard let self, self.activeTransferID == identifier else { break }
-                self.transferInfo = self.statistics?.snapshot(at: ProcessInfo.processInfo.systemUptime)
-            }
-        }
-        defer { ticker.cancel(); activeTransferID = nil }
-        var request = URLRequest(url: stream.url)
-        request.timeoutInterval = 120
-        let observer = TransferProgress { [weak self] bytes, total, timestamp in
-            Task { @MainActor in
-                guard let self, self.activeTransferID == identifier else { return }
-                self.statistics?.record(bytes: bytes, expectedBytes: total, at: timestamp)
-                self.transferInfo = self.statistics?.snapshot(at: ProcessInfo.processInfo.systemUptime)
-            }
-        }
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForResource = 3600
-        let session = URLSession(configuration: config)
-        defer { session.invalidateAndCancel() }
-        let (temp, response) = try await session.download(for: request, delegate: observer)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            throw DownloadFailure(message: "媒體伺服器回傳 HTTP \(code)，請稍後重試。")
-        }
-        try Task.checkCancellation()
-        let attributes = try FileManager.default.attributesOfItem(atPath: temp.path)
-        let count = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-        statistics?.finishPart(bytes: count, at: ProcessInfo.processInfo.systemUptime)
-        transferInfo = statistics?.snapshot(at: ProcessInfo.processInfo.systemUptime)
-        try FileManager.default.moveItem(at: temp, to: destination)
-        return destination
     }
 
     private func saveToPhotos(_ url: URL) async throws {
