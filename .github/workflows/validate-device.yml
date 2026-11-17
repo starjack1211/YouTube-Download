@@ -1,0 +1,32 @@
+name: Validate Python iPhone device build
+on:
+  push:
+    branches: [python-device-check]
+permissions:
+  contents: read
+jobs:
+  device:
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned Python runtime
+        run: python3 Scripts/prepare_python.py
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          python3 Scripts/make_icon.py
+          xcodegen generate
+      - name: Compile device app and Share Extension
+        run: |
+          set -o pipefail
+          xcodebuild -project YouTubeDownload.xcodeproj -scheme YouTubeDownload \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tee device-build.log
+      - name: Upload compilation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-build-log
+          path: device-build.log
+          if-no-files-found: ignore
