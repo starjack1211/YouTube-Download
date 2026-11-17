@@ -18,8 +18,12 @@ jobs:
       - name: Prepare reviewed extractor patch
         run: python3 Scripts/prepare_vendor.py
       - name: Test link parsing and transfer statistics
+        id: unit_tests
+        continue-on-error: true
         run: swift test
       - name: Live YouTube download, merge and signature regression tests
+        id: live_tests
+        continue-on-error: true
         timeout-minutes: 10
         run: |
           set -o pipefail
@@ -31,8 +35,22 @@ jobs:
           python3 Scripts/make_icon.py
           xcodegen generate
       - name: iPhone simulator download, Photos, share-input and UI tests
+        id: simulator_tests
+        continue-on-error: true
         timeout-minutes: 20
         run: bash Scripts/test_simulator.sh
+      - name: Require every test suite to pass before packaging
+        env:
+          UNIT_RESULT: ${{ steps.unit_tests.outcome }}
+          LIVE_RESULT: ${{ steps.live_tests.outcome }}
+          SIMULATOR_RESULT: ${{ steps.simulator_tests.outcome }}
+        run: |
+          echo "Unit tests: $UNIT_RESULT"
+          echo "Live YouTube tests: $LIVE_RESULT"
+          echo "iPhone simulator tests: $SIMULATOR_RESULT"
+          test "$UNIT_RESULT" = success
+          test "$LIVE_RESULT" = success
+          test "$SIMULATOR_RESULT" = success
       - name: Build iPhone app and share extension
         run: |
           set -o pipefail
