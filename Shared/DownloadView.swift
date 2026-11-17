@@ -74,6 +74,11 @@ struct DownloadView: View {
                          : "也可以在 YouTube → 分享 → 更多 →「下載到相簿」開始下載。下載時請保持 App 開啟。副本可在「檔案 → 我的 iPhone → 影片下載 → Downloads」管理。")
                     Text("僅下載你有權下載的內容。不支援需要登入、付費或受保護的影片；YouTube 改版可能使解析暫時失效。")
                 }.font(.footnote).foregroundStyle(.secondary)
+                Section {
+                    DisclosureGroup("開放原始碼授權") {
+                        Text(Notices.youtubeKit).font(.caption).textSelection(.enabled)
+                    }
+                }
             }
             .navigationTitle("影片下載")
             .tint(.red)

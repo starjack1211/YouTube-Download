@@ -54,4 +54,4 @@ xcodebuild -project YouTubeDownload.xcodeproj -scheme YouTubeDownload \
 - `project.yml`：XcodeGen 專案與 Extension。
 - `.github/workflows/build-ios.yml`：macOS 虛擬機測試、編譯及 IPA 打包。
 
-使用 [YouTubeKit](https://github.com/alexeichhorn/YouTubeKit)（MIT），固定 revision 以便重現編譯。依賴授權包含於其套件原始碼。此專案與 YouTube／Google 無隸屬關係。
+使用 [YouTubeKit](https://github.com/alexeichhorn/YouTubeKit)（MIT），固定 revision 以便重現編譯。YouTubeKit 授權亦包含於 App 的「開放原始碼授權」。此專案與 YouTube／Google 無隸屬關係。
