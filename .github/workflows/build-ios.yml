@@ -15,10 +15,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare reviewed extractor patch
+        run: python3 Scripts/prepare_vendor.py
       - name: Test link parsing and transfer statistics
         run: swift test
-      - name: Live YouTube extraction and media download
-        run: swift test --package-path Integration
+      - name: Live YouTube download, merge and signature regression tests
+        timeout-minutes: 10
+        run: |
+          set -o pipefail
+          swift test --package-path Integration | tee integration.log
       - name: Install project generator
         run: brew install xcodegen
       - name: Generate icon and Xcode project

@@ -105,7 +105,7 @@ final class Downloader: ObservableObject {
                 try Task.checkCancellation()
                 status = "下載完成，正在合併影音…"; transferInfo = nil
                 let merged = folder.appendingPathComponent("merged.mp4")
-                try await mux(video: videoURL, audio: audioURL, to: merged)
+                try await MediaMuxer.merge(video: videoURL, audio: audioURL, to: merged)
                 try Task.checkCancellation()
                 let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 let downloads = docs.appendingPathComponent("Downloads")
@@ -191,38 +191,6 @@ final class Downloader: ObservableObject {
         transferInfo = statistics?.snapshot(at: ProcessInfo.processInfo.systemUptime)
         try FileManager.default.moveItem(at: temp, to: destination)
         return destination
-    }
-
-    private func mux(video: URL, audio: URL?, to output: URL) async throws {
-        let composition = AVMutableComposition()
-        let asset = AVURLAsset(url: video)
-        guard let sourceVideo = try await asset.loadTracks(withMediaType: .video).first,
-              let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
-            throw DownloadFailure(message: "無法讀取影像軌。")
-        }
-        let duration = try await asset.load(.duration)
-        try videoTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: sourceVideo, at: .zero)
-        videoTrack.preferredTransform = try await sourceVideo.load(.preferredTransform)
-        let audioAsset = audio.map { AVURLAsset(url: $0) } ?? asset
-        guard let sourceAudio = try await audioAsset.loadTracks(withMediaType: .audio).first,
-              let audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
-            throw DownloadFailure(message: "無法讀取音軌。")
-        }
-        let audioDuration = try await audioAsset.load(.duration)
-        try audioTrack.insertTimeRange(CMTimeRange(start: .zero, duration: CMTimeMinimum(duration, audioDuration)), of: sourceAudio, at: .zero)
-        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
-            throw DownloadFailure(message: "無法建立 MP4 輸出。")
-        }
-        exporter.outputURL = output; exporter.outputFileType = .mp4; exporter.shouldOptimizeForNetworkUse = true
-        await withTaskCancellationHandler(operation: {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                exporter.exportAsynchronously { continuation.resume() }
-            }
-        }, onCancel: { exporter.cancelExport() })
-        try Task.checkCancellation()
-        guard exporter.status == .completed else {
-            throw exporter.error ?? DownloadFailure(message: "影音合併失敗。")
-        }
     }
 
     private func saveToPhotos(_ url: URL) async throws {
