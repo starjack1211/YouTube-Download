@@ -31,16 +31,18 @@ class IOSJavaScriptCoreJCP(JsChallengeProvider):
                 responses = result.get("responses", [])
                 if len(responses) != len(group):
                     raise JsChallengeProviderError(result.get("error", "Incomplete JavaScript response"))
+                completed = []
                 for request, response in zip(group, responses):
                     if response.get("type") != "result":
-                        yield JsChallengeProviderResponse(request, error=JsChallengeProviderError(
-                            response.get("error", "JavaScript challenge failed")))
+                        completed.append(JsChallengeProviderResponse(request, error=JsChallengeProviderError(
+                            response.get("error", "JavaScript challenge failed"))))
                         continue
                     data = response.get("data") or {}
                     if any(not isinstance(data.get(c), str) or not data[c] for c in request.input.challenges):
                         raise JsChallengeProviderError("Missing challenge solution")
                     output = NChallengeOutput(data) if request.type is JsChallengeType.N else SigChallengeOutput(data)
-                    yield JsChallengeProviderResponse(request, JsChallengeResponse(request.type, output))
+                    completed.append(JsChallengeProviderResponse(request, JsChallengeResponse(request.type, output)))
+                yield from completed
             except Exception as error:
                 for request in group:
                     yield JsChallengeProviderResponse(request, error=error)
