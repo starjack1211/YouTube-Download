@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test link parsing and transfer statistics
         run: swift test
+      - name: Live YouTube extraction and media download
+        run: swift test --package-path Integration
       - name: Install project generator
         run: brew install xcodegen
       - name: Generate icon and Xcode project
