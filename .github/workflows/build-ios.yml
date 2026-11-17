@@ -1,0 +1,45 @@
+name: Build iPhone IPA
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test shared-link parsing
+        run: swift test
+      - name: Install project generator
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build iPhone app and share extension
+        run: |
+          set -o pipefail
+          xcodebuild -project YouTubeDownload.xcodeproj -scheme YouTubeDownload \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tee build.log
+      - name: Package unsigned IPA for iLoader
+        run: |
+          mkdir -p build/Payload
+          cp -R build/Build/Products/Release-iphoneos/YouTubeDownload.app build/Payload/
+          cd build
+          zip -qry YouTubeDownload.ipa Payload
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: YouTubeDownload-IPA
+          path: build/YouTubeDownload.ipa
+          retention-days: 14
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
